@@ -1,6 +1,8 @@
 {- Mid-level array programming language that compiles to C.
  - 12 20 34 5 Int alloc -- allocates integer array with supplied values. -}
 
+import Data.List
+
 import Debug.Trace
 
 -- (lambda (type Int32 Int32) (quote + 1 (head :A:))) 
@@ -55,7 +57,7 @@ ltype (SFunc (Function _ _ _ io)) = Func io
 ltype _ = LError
 
 appF :: Function -> ([Function],[SExp]) -> ([Function],SExp)
-appF (Function "serror" _ _ _) _ = ([], SError "Error: s-exp head not a function.\n")
+appF (Function "error" _ _ _) _ = ([], SError "Error: s-exp head not a function.\n")
 appF (Function n f _ t) (nfs,e) =
   if map ltype e /= (init t) then
     (nfs,SError $ concat ["Error: type mismatch: ", show $ map ltype e, " ", show $ init t, "\n"])
@@ -64,13 +66,16 @@ appF (Function n f _ t) (nfs,e) =
 eval :: [Function] -> SExp -> ([Function],SExp)
 eval nfs (SApp f a) = appF fun $ (fst $ last ev, map snd ev)
   where ev = map (eval nfs) a
-        fun = case snd $ eval nfs f of (SFunc fu) -> fu
-                                       _          -> serror
+        fun = case snd $ eval nfs f of
+                (SFunc fu)    -> fu
+                (SL n Symbol) -> maybe serror id (find (\(Function k _ _ _) -> k==n) (nfs++fs))
+                _             -> serror
 eval nfs (SList a) = (fst $ last ev, SList $ map snd ev) where ev = map (eval nfs) a
 eval nfs a = (nfs,a)
 
 main = do
-  let (nfs,res) = eval [] (SApp (SFunc def) [SL "inc" Symbol, SArr [TInt32,TInt32]
-                                            ,Quote (SApp (SFunc add)
-                                               [SApp (SFunc shead) [Arg],SL "1" TInt32])])
-  putStrLn $ show $ eval [] (SApp (SFunc $ nfs!!0) [SL "1" TInt32]) 
+  let (nfs,res) = eval [] (SApp (SL "def" Symbol)
+                            [SL "inc" Symbol, SArr [TInt32,TInt32]
+                            ,Quote (SApp (SL "+" Symbol)
+                              [SApp (SL "head" Symbol) [Arg],SL "1" TInt32])])
+  putStrLn $ show $ eval nfs (SApp (SL "inc" Symbol) [SL "1" TInt32])
