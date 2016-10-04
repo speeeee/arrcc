@@ -1,7 +1,12 @@
+{-# LANGUAGE MultiWayIf #-}
 {- Mid-level array programming language that compiles to C.
  - 12 20 34 5 Int alloc -- allocates integer array with supplied values. -}
 
+{- Stream-based idea would make best of looping. -}
+
 import Data.List
+import Data.List.Split
+import Text.Read (readMaybe)
 
 import Debug.Trace
 
@@ -24,6 +29,8 @@ data SExp = SApp SExp [SExp] | SFunc Function
           | SL [Char] SType | Quote SExp | SArr [SType] | SList [SExp]
           | Arg | SError [Char]  deriving (Show,Eq)
 
+-- TODO: add lambda function.
+-- TODO: make type-casting functions for Int8, Int16, etc. from Int32.
 fs :: [Function]
 fs = [Function "+" (\nfs lst -> case lst of
                      (SL a _:SL b _:_) -> (nfs,SL (concat ["(",a,"+",b,")"]) TInt32)
@@ -73,9 +80,37 @@ eval nfs (SApp f a) = appF fun $ (fst $ last ev, map snd ev)
 eval nfs (SList a) = (fst $ last ev, SList $ map snd ev) where ev = map (eval nfs) a
 eval nfs a = (nfs,a)
 
+{-- Lexer ---------------------------------------}
+-- standard LISP-style lexer (topmost parentheses omitted)
+
+-- takes character list and parses the toplevel as if it were an s-expr.
+--   e.g. "+ (+ 1 2) 1" --> ["+", "+ 1 2", "1"]
+downLevel :: [Char] -> [[Char]]
+downLevel = chop (\k@(kh:ks) -> if | kh == '(' -> let (a,b) = break (==')') ks in (a,tail b)
+                                   | kh`elem`" \r\t\n" -> ([],snd $ span (flip elem " \r\t\n") ks)
+                                   | otherwise -> span (not . flip elem " \r\t\n(") k)
+
+lexe :: [Char] -> SExp
+lexe q = let qx = filter (not . null) $ downLevel q in
+  case qx of (qh:[]) -> SL qh (typeOf qh)
+             (qh:qs) -> SApp (lexe qh) (map lexe qs)
+             _       -> SList []
+
+typeF :: Double -> SType
+typeI :: Int    -> SType
+typeF _ = TFloat64
+typeI _ = TInt32
+
+typeOf :: [Char] -> SType
+typeOf str = maybe (maybe Symbol typeF (readMaybe str :: Maybe Double))
+                   typeI (readMaybe str :: Maybe Int)
+{------------------------------------------------}
+
 main = do
-  let (nfs,res) = eval [] (SApp (SL "def" Symbol)
+  {-let (nfs,res) = eval [] (SApp (SL "def" Symbol)
                             [SL "inc" Symbol, SArr [TInt32,TInt32]
                             ,Quote (SApp (SL "+" Symbol)
                               [SApp (SL "head" Symbol) [Arg],SL "1" TInt32])])
-  putStrLn $ show $ eval nfs (SApp (SL "inc" Symbol) [SL "1" TInt32])
+  putStrLn $ show $ eval nfs (SApp (SL "inc" Symbol) [SL "1" TInt32])-}
+  let (nfs,res) = eval [] $ lexe "+ (+ 1 2) 1"
+  putStrLn $ show res
