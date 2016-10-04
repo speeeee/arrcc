@@ -2,7 +2,7 @@
 {- Mid-level array programming language that compiles to C.
  - 12 20 34 5 Int alloc -- allocates integer array with supplied values. -}
 
-{- Stream-based idea would make best of looping. -}
+{- Stream-based idea would make best of looping.  Values can be added to the stream and removed. -}
 
 import Data.List
 import Data.List.Split
@@ -31,6 +31,8 @@ data SExp = SApp SExp [SExp] | SFunc Function
 
 -- TODO: add lambda function.
 -- TODO: make type-casting functions for Int8, Int16, etc. from Int32.
+-- TODO: make function: SList -> SArr
+-- TODO: make function: {Args} -> SList
 fs :: [Function]
 fs = [Function "+" (\nfs lst -> case lst of
                      (SL a _:SL b _:_) -> (nfs,SL (concat ["(",a,"+",b,")"]) TInt32)
@@ -87,12 +89,15 @@ eval nfs a = (nfs,a)
 --   e.g. "+ (+ 1 2) 1" --> ["+", "+ 1 2", "1"]
 downLevel :: [Char] -> [[Char]]
 downLevel = chop (\k@(kh:ks) -> if | kh == '(' -> let (a,b) = break (==')') ks in (a,tail b)
+                                   | kh == '{' -> let (a,b) = break (=='}') ks in ('\'':a,tail b)
                                    | kh`elem`" \r\t\n" -> ([],snd $ span (flip elem " \r\t\n") ks)
                                    | otherwise -> span (not . flip elem " \r\t\n(") k)
 
 lexe :: [Char] -> SExp
 lexe q = let qx = filter (not . null) $ downLevel q in
-  case qx of (qh:[]) -> SL qh (typeOf qh)
+  case qx of (('\'':ks):[]) -> Quote $ lexe ks
+             (":A:":[]) -> Arg
+             (qh:[]) -> SL qh (typeOf qh)
              (qh:qs) -> SApp (lexe qh) (map lexe qs)
              _       -> SList []
 
