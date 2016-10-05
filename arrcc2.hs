@@ -55,8 +55,7 @@ tokens = chop (\k@(kh:ks) -> if | kh`elem`" \t\r\n" -> ([], snd $ span (`elem`" 
 -- cleaning needed..
 parens :: ([Char],[Char]) -> Int -> ([Char],[Char])
 parens (e,('[':ks)) amt = parens (e++"[",ks) (amt+1)
-parens (e,(']':ks)) 1   = (e,ks)
-parens (e,(']':ks)) amt = parens (e++"]",ks) (amt-1)
+parens (e,(']':ks)) amt = if amt == 1 then (e,ks) else parens (e++"]",ks) (amt-1)
 parens (e,k:ks) amt = parens (e++[k],ks) amt
 parens _ _ = ([],[])
 
@@ -69,8 +68,8 @@ lexer :: [[Char]] -> [Lit]
 lexer =
   map (\k -> maybe (maybe (if null $ intersect k " \t\r\n" then SL k TSym
                                                            else SQ $ lexer $ tokens k)
-                     (SL k . typeI) (readMaybe k :: Maybe Int))
-               (SL k . typeF) (readMaybe k :: Maybe Double)) . filter (not . null)
+                     (SL k . typeF) (readMaybe k :: Maybe Double))
+               (SL k . typeI) (readMaybe k :: Maybe Int)) . filter (not . null)
 
 eval :: ([Func],[Lit]) -> [Lit] -> ([Func],[Lit])
 eval = foldl (\(nfs,nd) lit -> case lit of
@@ -80,4 +79,4 @@ eval = foldl (\(nfs,nd) lit -> case lit of
                a        -> (nfs,a:nd))
 
 main = do
-  putStrLn $ show $ eval ([],[]) $ lexer $ tokens "1 [2 3] 3"
+  putStrLn $ show $ eval ([],[]) $ lexer $ tokens "1 3 +"
