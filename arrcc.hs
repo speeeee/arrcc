@@ -14,7 +14,8 @@ import Debug.Trace
 --   --> Function "Lambda" (+ 1 (head :A:)) [TInt32,TInt32]
 
 data SType    = TInt8 | TInt16 | TInt32 | TInt64 | TFloat32 | TFloat64
-              | Symbol | Quot | TArr | TList | Func [SType] | Any | LError deriving (Show)
+              | Symbol | Quot | TArr | TList | Func [SType] | Any 
+              | Varying SType | LError deriving (Show,Read)
 -- because of Any, any function type must be on RHS.
 instance Eq SType where
   a == Any = True
@@ -29,10 +30,10 @@ data SExp = SApp SExp [SExp] | SFunc Function
           | SL [Char] SType | Quote SExp | SArr [SType] | SList [SExp]
           | Arg | SError [Char]  deriving (Show,Eq)
 
--- TODO: add lambda function.
+-- TODO: add lambda function. DONE
 -- TODO: make type-casting functions for Int8, Int16, etc. from Int32.
 -- TODO: make function: SList -> SArr
--- TODO: make function: {Args} -> SList
+-- TODO: make function: {Args} -> SList DONE
 fs :: [Function]
 fs = [Function "+" (\nfs lst -> case lst of
                      (SL a _:SL b _:_) -> (nfs,SL (concat ["(",a,"+",b,")"]) TInt32)
@@ -40,6 +41,20 @@ fs = [Function "+" (\nfs lst -> case lst of
      ,Function "head" (\nfs lst -> case lst of
                         (SList a:_) -> (nfs,head a)
                         _ -> (nfs,SError "Error.\n")) [] [TList,Any]
+     {-,Function "tail" (\nfs lst -> case lst of
+                        (SList a:_) -> (nfs,SList $ tail a)
+                        _ -> (nfs,SError "Error.\n")) [] [TList,Any]
+     ,Function "empty?" (\nfs lst -> case lst of
+                          (SList a:_) -> (nfs, SL (show $ fromEnum $ null a) TInt32)
+                          _ -> (nfs,SError "Error.\n")) [] [TList,TInt32]
+     ,Function "lambda" (\nfs lst -> case lst of
+                          (SArr a:Quote  b:_) ->
+                            (nfs,SFunc $ Function "LAMB" (\nnfs nlst -> eval nnfs $ repl nlst b) [] a)
+                          _ -> (nfs,SError "Error.\n")) [] [TArr,Quot,Any]
+     ,Function "list" (\nfs lst -> (nfs,SList lst)) [] [Varying Any]
+     ,Function "type" (\nfs lst -> case lst of
+                        (SList a:_) -> (nfs,SArr $ map lstToType a)
+                        _ -> (nfs,SError "Error.\n")) [] [TList,TArr]-}
      ,Function "def" (\nfs lst -> case lst of
                        (SL n _:SArr a:Quote b:_) ->
                          (Function n (\nnfs nlst -> eval nnfs $ repl nlst b) [] a:nfs,SList [])
@@ -50,6 +65,11 @@ add    = head fs
 def    = fs!!2
 shead  = fs!!1
 serror = fs!!3
+
+{-lstToType :: [SExp] -> SType
+lstToType (SL a Symbol) = read a :: SType
+lstToType (SList a) = SArr $ map lstToType a
+lstToType _ = LError-}
 
 repl :: [SExp] -> SExp -> SExp
 repl l k = case k of Arg           -> SList l
@@ -67,6 +87,9 @@ ltype _ = LError
 
 appF :: Function -> ([Function],[SExp]) -> ([Function],SExp)
 appF (Function "error" _ _ _) _ = ([], SError "Error: s-exp head not a function.\n")
+appF (Function n f _ [Varying a]) (nfs,e) =
+  if all (==a) $ map ltype e then (f nfs) e
+  else (nfs,SError $ concat ["Error: type mismatch: ", show $ map ltype e, " ", show a, "...\n"])
 appF (Function n f _ t) (nfs,e) =
   if map ltype e /= (init t) then
     (nfs,SError $ concat ["Error: type mismatch: ", show $ map ltype e, " ", show $ init t, "\n"])
@@ -88,10 +111,16 @@ eval nfs a = (nfs,a)
 -- takes character list and parses the toplevel as if it were an s-expr.
 --   e.g. "+ (+ 1 2) 1" --> ["+", "+ 1 2", "1"]
 downLevel :: [Char] -> [[Char]]
-downLevel = chop (\k@(kh:ks) -> if | kh == '(' -> let (a,b) = break (==')') ks in (a,tail b)
-                                   | kh == '{' -> let (a,b) = break (=='}') ks in ('\'':a,tail b)
+downLevel = chop (\k@(kh:ks) -> if | kh == '(' -> parens "()" ([],ks) 1
+                                   | kh == '{' -> parens "{}" ([],ks) 1
                                    | kh`elem`" \r\t\n" -> ([],snd $ span (flip elem " \r\t\n") ks)
                                    | otherwise -> span (not . flip elem " \r\t\n(") k)
+
+parens :: [Char] -> ([Char],[Char]) -> Int -> ([Char],[Char])
+parens (a:b:_) (e,(kh:ks)) amt = if | kh==a -> parens (a:b:[]) (e++[a],ks) (amt+1)
+                                    | kh==b -> if amt == 1 then (e,ks) else parens (a:b:[]) (e++[b],ks) (amt-1)
+                                    | otherwise -> parens (a:b:[]) (e++[kh],ks) amt
+parens _ _ _ = ([],[])
 
 lexe :: [Char] -> SExp
 lexe q = let qx = filter (not . null) $ downLevel q in
@@ -117,5 +146,5 @@ main = do
                             ,Quote (SApp (SL "+" Symbol)
                               [SApp (SL "head" Symbol) [Arg],SL "1" TInt32])])
   putStrLn $ show $ eval nfs (SApp (SL "inc" Symbol) [SL "1" TInt32])-}
-  let (nfs,res) = eval [] $ lexe "+ (+ 1 2) 1"
+  let (nfs,res) = eval [] $ lexe "+ (+ 1 2) 3"
   putStrLn $ show res
