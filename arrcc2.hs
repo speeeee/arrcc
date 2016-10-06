@@ -27,6 +27,11 @@ data Func = Func [Char] ([Func] -> [Lit] -> ([Func],[Lit]))
 instance Show Func where
   show (Func n _) = "<function: "++n++">"
 
+-- TODO: define `aalloc': will take the deque front up to `$' and allocate an array with those
+--         elements.  The pointer will be pushed to the front of the deque and to the back
+--         of the deque behind the `SCOPE' (this is where things will be freed).
+-- TODO: define `free': will free the current scope by taking the deque back up to `SCOPE'
+--         and freeing every pointer.
 fs :: [Func]
 fs = [Func "+" (\nfs deq -> case deq of
                   (SL a TInt32:SL b TInt32:r) -> (nfs, SL (concat ["(",a,"+",b,")"]) TInt32:r)
@@ -34,7 +39,13 @@ fs = [Func "+" (\nfs deq -> case deq of
      ,Func "call" (\nfs deq -> case deq of
                     (SQ a:r) -> eval (nfs,r) a
                     _ -> (nfs,[SError "Error: Callee not a valid quote.\n"]))
-     ,Func "error" (\_ _ -> ([],[SError "Error: attempted to call unbound variable.\n"]))]
+     ,Func "error" (\_ _ -> ([],[SError "Error: attempted to call unbound variable.\n"]))
+     ,Func "=" (\nfs deq -> case deq of
+                 (a:b:r) -> (nfs, SL (show $ fromEnum $ a == b) TInt32:r)
+                 _ -> (nfs,[SError "Error: stack underflow.\n"]))
+     ,Func "<-" (\nfs deq -> case deq of
+                  (SQ a:r) -> (fsf,reverse deqf) where (fsf,deqf) =  eval (nfs,reverse r) a
+                  _ -> (nfs,[SError "Error: Callee not a valid quote.\n"]))]
 serror :: [Func] -> [Lit] -> ([Func],[Lit])
 serror = let (Func _ b) = fs!!2 in b
 
@@ -49,7 +60,8 @@ popb = last
 tokens :: [Char] -> [[Char]]
 tokens = chop (\k@(kh:ks) -> if | kh`elem`" \t\r\n" -> ([], snd $ span (`elem`" \t\r\n") ks)
                                 | kh`elem`"(){}'" -> ([kh],ks)
-                                | kh=='[' -> parens ([],ks) 1 
+                                | kh=='[' -> let (kka,kks) = parens ([],ks) 1
+                                             in (concat ["[",kka,"]"],kks)
                                 | otherwise -> span (not . (`elem`" \t\r\n(){}[]'")) k)
 
 -- cleaning needed..
@@ -66,8 +78,8 @@ typeI _ = TInt32
 
 lexer :: [[Char]] -> [Lit]
 lexer =
-  map (\k -> maybe (maybe (if null $ intersect k " \t\r\n" then SL k TSym
-                                                           else SQ $ lexer $ tokens k)
+  map (\k -> maybe (maybe (if (head k) /= '[' then SL k TSym
+                                              else SQ $ lexer $ tokens $ tail $ init k)
                      (SL k . typeF) (readMaybe k :: Maybe Double))
                (SL k . typeI) (readMaybe k :: Maybe Int)) . filter (not . null)
 
@@ -79,4 +91,4 @@ eval = foldl (\(nfs,nd) lit -> case lit of
                a        -> (nfs,a:nd))
 
 main = do
-  putStrLn $ show $ eval ([],[]) $ lexer $ tokens "1 3 +"
+  putStrLn $ show $ eval ([],[]) $ lexer $ tokens "1 3 [+] call"
