@@ -32,6 +32,11 @@ instance Show Func where
 --         of the deque behind the `SCOPE' (this is where things will be freed).
 -- TODO: define `free': will free the current scope by taking the deque back up to `SCOPE'
 --         and freeing every pointer.
+-- TODO: define `curry': does exactly as it does in factor.
+-- TODO: define `@>': pass stream: input from a; output to new array b.
+-- TODO: define `@<': set stream: input from a; all are changes to a.
+--         e.g. $ 1 2 3 aalloc [+] @<    =    6
+-- TODO: define `?': if a then b else c: 2 1 [+] [-] ?    =    3
 fs :: [Func]
 fs = [Func "+" (\nfs deq -> case deq of
                   (SL a TInt32:SL b TInt32:r) -> (nfs, SL (concat ["(",a,"+",b,")"]) TInt32:r)
@@ -45,7 +50,10 @@ fs = [Func "+" (\nfs deq -> case deq of
                  _ -> (nfs,[SError "Error: stack underflow.\n"]))
      ,Func "<-" (\nfs deq -> case deq of
                   (SQ a:r) -> (fsf,reverse deqf) where (fsf,deqf) =  eval (nfs,reverse r) a
-                  _ -> (nfs,[SError "Error: Callee not a valid quote.\n"]))]
+                  _ -> (nfs,[SError "Error: Callee not a valid quote.\n"]))
+     ,Func "?" (\nfs deq -> case deq of
+                 (b:c:SL a t:r) -> if a == "0" then (nfs,b:r) else (nfs,c:r)
+                 _ -> (nfs,[SError "Error: stack underflow or non-boolean expression as testee.\n"]))]
 serror :: [Func] -> [Lit] -> ([Func],[Lit])
 serror = let (Func _ b) = fs!!2 in b
 
@@ -91,4 +99,4 @@ eval = foldl (\(nfs,nd) lit -> case lit of
                a        -> (nfs,a:nd))
 
 main = do
-  putStrLn $ show $ eval ([],[]) $ lexer $ tokens "1 3 [+] call"
+  putStrLn $ show $ eval ([],[]) $ lexer $ tokens "2 2 1 [+] [-] ? call"
