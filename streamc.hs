@@ -25,15 +25,19 @@ data SType = SType Typ | SF [Typ] Typ deriving (Show,Eq)
 data Dyad = Dyad [Char] ([Var] -> Expr -> Expr -> ([Var],Expr))
 data Mon  = Mon [Char] ([Var] -> Expr -> ([Var],Expr))
 
+data Args = X | Y | PArg deriving (Show,Eq)
+
 data Var  = Var Name Expr SType Int deriving (Show,Eq) -- scope
 data Expr = Lit [Char] SType
           | Sym Expr SType Int -- (Val,Type,Scope).
           | Tup [Expr]
+          | Quote [Expr]
           | D Expr Dyad Expr
           | M Mon Expr
           | Function [Char] ([Var] -> [Expr] -> Int -> ([Var],Expr))
               -- functions/variables -> tuple -> scope -> result.
           | C Expr Expr -- composition or special application. e.g. (f, g)(x).
+          | Arg Args | LError
 
 vs :: [Var]
 vs = []
@@ -50,24 +54,24 @@ parens (a:b:_) (e,(kh:ks)) amt = if | kh==a -> parens (a:b:[]) (e++[a],ks) (amt+
                                     | otherwise -> parens (a:b:[]) (e++[kh],ks) amt
 parens _ _ _ = ([],[])
 
-lexe :: [Char] -> SExp
+{- lexe :: [Char] -> SExp
 lexe q = let qx = filter (not . null) $ downLevel q in
   case qx of (('\'':ks):[]) -> Quote $ lexe ks
              (":A:":[]) -> Arg
              (qh:[]) -> SL qh (typeOf qh)
              (qh:qs) -> SApp (lexe qh) (map lexe qs)
-             _       -> SList []
+             _       -> SList [] -}
 
 conv :: [[Char]] -> ([Char],SType)
 conv = map (\k -> case (kh:_) of
              '(' -> (init $ tail k,SType ["runtime","group"])
              _   -> typeOf k)
 
-{-lexer :: ([Char],SType) -> Expr
-lexer qx = -- let qx = conv $ filter (not . null) $ downLevel q in
-  case qx of ((a,SType ["runtime","symbol"]):r) ->
-               -- done using filter for later.
-               case filter (\(Var n e t _) -> -}
+lexer :: [[Char]] -> [Expr]
+lexer =
+  map (\k -> case k of (a,["runtime","group"]) -> Quote a
+                       (a,t)                   -> Lit a t
+                       _                       -> LError) . conv . filter (not . null) . downLevel
 
 typeF :: Double -> SType
 typeI :: Int    -> SType
@@ -75,5 +79,22 @@ typeF _ = SType ["runtime","float32"]
 typeI _ = SType ["runtime","int32"]
 
 typeOf :: [Char] -> SType
-typeOf str = maybe (maybe (SType ["runtime","symbol"]) typeF (readMaybe str :: Maybe Double))
+typeOf str = maybe (maybe (SType ["runtime","sym/var"]) typeF (readMaybe str :: Maybe Double))
                    typeI (readMaybe str :: Maybe Int)
+{- Rules of parsing:
+   - if the first expression Q in list L is a symbol and a monad -> Q (tail L)
+   ; if there exists a symbol S in list L that is a dyad -> (left of S in L) S (right of S in L)
+       (note: (,) is a dyad that can make tuples)
+   ; if expression A is adjacent to expression B (right associative) ->
+       if A is a function and B is a tuple -> apply A to B if type matches correctly
+     ; if both A and B are functions -> perform function compositions if types permit
+     ; if type of A is (T1,T2,...) and Tn is a function and B is a tuple ->
+         if types permit, apply all functions to that tuple and return a tuple of the results
+     ; return syntax error
+   ; return syntax error -}
+{- General use:
+   - monad 'dyad' is used to define a dyadic function: type f := (int32, int32) -> int32,
+                                                       dyad f := @x + @y
+   - the same is with monad 'monad'. -}
+{-parse :: [Expr] -> Expr
+parse ((Lit a ["runtime","sym/var"):r) = -}
