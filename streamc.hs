@@ -19,14 +19,17 @@
    H add@(positive int32, int32) := rebuke positive -- if a positive is added to a regular, then
                                                     -- the positive is no longer provably positive. -}
 {-# LANGUAGE MultiWayIf, ScopedTypeVariables #-}
-import Data.List (union,find)
+import Data.List (union,find,(\\))
 import Data.List.Split
 import Text.Read (readMaybe)
 
 import Debug.Trace
 
 type Typ   = [[Char]]
-data SType = SType Typ | SF [Typ] Typ deriving (Show,Eq)
+data SType = SType Typ | SF [Typ] Typ deriving (Show)
+instance Eq SType where
+  (SType a) == (SType b) = all (`elem`a) b
+  (SF a b) == (SF c d) = a==c&&b==d
 
 data Dyad = Dyad ([Var] -> Expr -> Expr -> ([Var],Expr))
 data Mon  = Mon ([Var] -> Expr -> ([Var],Expr))
@@ -58,9 +61,18 @@ instance Show Expr where
   show (Function _) = "<function>"
   show (Lit a t) = concat ["Lit ",show a," ",show t]
   show (Quote a) = "Quote "++show a
+  show (LError a) = "Error: "++a++"\n"
+  show (Tup e) = "Tuple "++show e
 
-vs :: [Var]
-vs = [Var "cprog" (Lit [] $ SType ["program"]) 0]
+pvs :: [Var]
+pvs = [Var "cprog" (Lit [] $ SType ["program"]) 0
+      ,Var "add" (Function (\vs tup sc -> case tup of
+                             (Lit a (SType ["int32"]):Lit b (SType ["int32"]):_) ->
+                               let (Var _ (Lit prog _) _) = head vs
+                                   res = concat ["int32_t add_",a,"_",b," = (",a,"+",b,");\n"]
+                               in (Var "cprog" (Lit (prog++res) $ SType ["program"]) 0:tail vs
+                                  ,Lit ("add_"++"a"++"_"++"b") $ SType ["int32"])
+                             _ -> (vs,LError "type mismatch.\n"))) 0]
 
 downLevel :: [Char] -> [[Char]]
 downLevel = chop (\k@(kh:ks) -> if | kh=='(' -> let (kka,kks) = parens "()" ([],ks) 1
@@ -138,9 +150,9 @@ parse vs (l:OpD f:r) = f vs (snd $ parse vs [l]) (snd $ parse vs r)
 parse vs (Quote a:r) = parse vs $ (snd $ parse vs a):r
 parse vs (Function fa:r) = case parse vs r of
   (_,Tup lst) -> fa vs lst 0
-  _           -> (vs,LError "Error: ill-formed expression.\n")
+  _           -> (vs,LError "function could not be applied correctly.")
 parse vs (a:[]) = (vs,a)
-parse vs _ = (vs,LError "Error: ill-formed expression.\n")
+parse vs _ = (vs,LError "ill-formed expression.")
 
 main = do
-  putStrLn $ show $ lexer "1, (123, (1,124))"
+  putStrLn $ show $ snd $ parse pvs $ lexer "add(1,2)"
