@@ -25,10 +25,10 @@ import Text.Read (readMaybe)
 
 import Debug.Trace
 
-type Typ   = [[Char]]
-data SType = SType Typ | SF [Typ] Typ deriving (Show)
+data Typ   = C [Char] | S SType deriving (Show,Eq)
+data SType = SType [Typ] | SF [SType] SType | Tu [SType] deriving (Show)
 instance Eq SType where
-  (SType a) == (SType b) = all (`elem`a) b
+  (SType a) == (SType b) = all (`elem`a) b||C"any"`elem`b
   (SF a b) == (SF c d) = a==c&&b==d
 
 data Dyad = Dyad ([Var] -> Expr -> Expr -> ([Var],Expr))
@@ -42,37 +42,44 @@ instance Eq Var where
 data Expr = Lit [Char] SType
           | Sym Expr SType Int -- (Val,Type,Scope).
           | Tup [Expr]
-          | Quote [Expr] | OpD ([Var] -> Expr -> Expr -> ([Var],Expr))
-          | OpM ([Var] -> Expr -> ([Var],Expr))
+          | Quote [Expr] | OpD ([Var] -> Expr -> Expr -> ([Var],Expr)) SType
+          | OpM ([Var] -> Expr -> ([Var],Expr)) SType
           -- | D Expr Dyad Expr
           -- | M Mon Expr
-          | Function ([Var] -> [Expr] -> Int -> ([Var],Expr))
+          | Function ([Var] -> [Expr] -> Int -> ([Var],Expr)) SType
               -- functions/variables -> tuple -> scope -> result.
-          | C Expr Expr -- composition or special application. e.g. (f, g)(x).
+          -- | C Expr Expr -- composition or special application. e.g. (f, g)(x).
           | Arg Args | LError [Char]
 instance Eq Expr where
   (Lit a ta) == (Lit b tb) = a==b&&tb==ta
   (Sym e t s) == (Sym eb tb sb) = e==eb&&t==tb&&s==sb
   (Tup a) == (Tup b) = a==b
-  a == b = True
+  a == b = False
 instance Show Expr where
-  show (OpM _) = "<monadic function>"
-  show (OpD _) = "<dyadic function>"
-  show (Function _) = "<function>"
+  show (OpM _ _) = "<monadic function>"
+  show (OpD _ _) = "<dyadic function>"
+  show (Function _ _) = "<function>"
   show (Lit a t) = concat ["Lit ",show a," ",show t]
   show (Quote a) = "Quote "++show a
   show (LError a) = "Error: "++a++"\n"
   show (Tup e) = "Tuple "++show e
 
+inputs :: SType -> [SType]
+inputs (SF a _) = a
+inputs _ = []
+
 pvs :: [Var]
-pvs = [Var "cprog" (Lit [] $ SType ["program"]) 0
+pvs = [Var "cprog" (Lit [] $ SType [C"program"]) 0
       ,Var "add" (Function (\vs tup sc -> case tup of
-                             (Lit a (SType ["int32"]):Lit b (SType ["int32"]):_) ->
+                             (Lit a _:Lit b _:_) ->
                                let (Var _ (Lit prog _) _) = head vs
                                    res = concat ["int32_t add_",a,"_",b," = (",a,"+",b,");\n"]
-                               in (Var "cprog" (Lit (prog++res) $ SType ["program"]) 0:tail vs
-                                  ,Lit ("add_"++"a"++"_"++"b") $ SType ["int32"])
-                             _ -> (vs,LError "type mismatch.\n"))) 0]
+                                   nv  = Var "cprog" (Lit (prog++res) $ SType [C"program"]) 0
+                               in (nv:tail vs
+                                  ,Lit ("add_"++"a"++"_"++"b") $ SType [C"int32"])
+                             _ -> (vs,LError "not enough arguments.\n"))
+                  (SF [SType [C"int32"],SType [C"int32"]] $ SType [C"int32"])) 0
+      ,Var "," (OpD (\vs a b -> (vs,Tup [a,b])) (SF [SType [C"any"],SType [C"any"]] $ SType [C"T"])) 0]
 
 downLevel :: [Char] -> [[Char]]
 downLevel = chop (\k@(kh:ks) -> if | kh=='(' -> let (kka,kks) = parens "()" ([],ks) 1
@@ -93,38 +100,50 @@ parens _ _ _ = ([],[])
 conv :: [[Char]] -> [([Char],SType)]
 -- use of head here is dangerous, but empty strings were filtered previously.
 conv = map (\k -> case head k of
-             '(' -> (init $ tail k,SType ["runtime","group"])
+             '(' -> (init $ tail k,SType [C"runtime",C"group"])
              _   -> (k,typeOf k))
 
 lexer :: [Char] -> [Expr]
 lexer =
-  map (\k -> case k of (a,SType ["runtime","group"]) -> Quote $ lexer a
+  map (\k -> case k of (a,SType [C"runtime",C"group"]) -> Quote $ lexer a
                        (a,t)                   -> Lit a t)
   . conv . filter (not . null) . downLevel
 
 typeF :: Double -> SType
 typeI :: Int    -> SType
-typeF _ = SType ["runtime","float32"]
-typeI _ = SType ["runtime","int32"]
+typeF _ = SType [C"runtime",C"float32"]
+typeI _ = SType [C"runtime",C"int32"]
 
 typeOf :: [Char] -> SType
-typeOf str = maybe (maybe (SType ["runtime","sym/var"]) typeF (readMaybe str :: Maybe Double))
+typeOf str = maybe (maybe (SType [C"runtime",C"sym/var"]) typeF (readMaybe str :: Maybe Double))
                    typeI (readMaybe str :: Maybe Int)
 
 symvar :: [Var] -> [Expr] -> [Expr]
 symvar vs = map (\k -> case k of
-                  (Lit a (SType ["runtime","sym/var"])) -> 
+                  (Lit a (SType [C"runtime",C"sym/var"])) -> 
                     case find (\(Var n _ _) -> n==a) vs of
                       Just (Var n x _) -> x
-                      Nothing     -> Lit a $ SType ["runtime","symbol"]
+                      Nothing          -> Lit a $ SType [C"runtime",C"symbol"]
                   a -> a)
+
+getType :: Expr -> SType
+getType (Lit _ t) = t
+getType (OpD _ t) = t
+getType (OpM _ t) = t
+getType (Function _ t) = t
+getType (Quote _) = SType [C"runtime",C"group"]
+getType (Tup t) = SType [C"tuple"]
+getType _ = SType [C"error"]
+typeCheck :: [SType] -> [SType] -> Bool
+typeCheck = (==)
 
 --exec :: [Var] -> [Expr] -> ([Var],Expr)
 --exec vs = foldl (\q nvs ->) vs . splitOn ","
 -- any output of a given expression is documented in the 'cprog' variable.
+-- WARNING: `flip union' done because when two elements match (wrt Eq instance), the LHS is preferred.
 exec :: [Var] -> [Expr] -> [Var]
-exec vs e = foldl (\nvs q -> union nvs $ fst $ parse vs $ symvar vs q) vs $ splitOn
-              [(Lit "," $ SType ["runtime","sym/var"])] e
+exec vs e = foldl (\nvs q -> flip union nvs $ fst $ parse vs $ symvar vs q) vs $ splitOn
+              [(Lit "," $ SType [C"runtime",C"sym/var"])] e
 
 {- Rules of parsing:
    - if the first expression Q in list L is a symbol and a monad -> Q (tail L)
@@ -145,14 +164,27 @@ exec vs e = foldl (\nvs q -> union nvs $ fst $ parse vs $ symvar vs q) vs $ spli
 -- untyped so far
 -- not yet implemented composition
 parse :: [Var] -> [Expr] -> ([Var],Expr)
-parse vs (OpM f:r) = uncurry f $ parse vs r
-parse vs (l:OpD f:r) = f vs (snd $ parse vs [l]) (snd $ parse vs r)
+{-parse vs (a:[]) = (vs,a)
+parse vs (OpM f typ:r) = uncurry f $ parse vs r
+parse vs (l:OpD f typ:r) = f vs (snd $ parse vs [l]) (snd $ parse vs r)
 parse vs (Quote a:r) = parse vs $ (snd $ parse vs a):r
-parse vs (Function fa:r) = case parse vs r of
-  (_,Tup lst) -> fa vs lst 0
+parse vs (Function fa typ:r) = case parse vs r of
+  (_,Tup lst) -> if (map getType lst) == (inputs typ) 
+                 then fa vs lst 0 else (vs,LError "type mismatch.\n")
   _           -> (vs,LError "function could not be applied correctly.")
-parse vs (a:[]) = (vs,a)
-parse vs _ = (vs,LError "ill-formed expression.")
+-- parse vs (a:[]) = (vs,a)
+parse vs a = (vs,LError "ill-formed expression.")-}
+parse vs q = case q of
+  --(a:[]) -> (vs,a)
+  (OpM f typ:r) -> uncurry f $ parse vs r
+  (l:OpD f typ:r) -> f vs (snd $ parse vs [l]) (snd $ parse vs r)
+  (Quote a:r) -> parse vs $ (snd $ parse vs $ symvar vs a):r
+  (Function fa typ:r) -> case parse vs r of
+    (_,Tup lst) -> if (map getType lst) == (inputs typ) 
+                   then fa vs lst 0 else (vs,LError "type mismatch.\n")
+    _           -> (vs,LError "function could not be applied correctly.")
+  (a:[]) -> (vs,a)
+  _ -> (vs,LError "ill-formed expression.")
 
 main = do
-  putStrLn $ show $ snd $ parse pvs $ lexer "add(1,2)"
+  putStrLn $ show $ exec pvs $ lexer "add(1,2)"
