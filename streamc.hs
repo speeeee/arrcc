@@ -33,7 +33,7 @@ data Mon  = Mon ([Var] -> Expr -> ([Var],Expr))
 
 data Args = X | Y | PArg deriving (Show,Eq)
 
-data Var  = Var [Char] Expr Int -- scope; C-based
+data Var  = Var [Char] Expr Int deriving (Show) -- scope; C-based
 instance Eq Var where
   (Var na _ _) == (Var nb _ _) = na==nb
 data Expr = Lit [Char] SType
@@ -52,6 +52,12 @@ instance Eq Expr where
   (Sym e t s) == (Sym eb tb sb) = e==eb&&t==tb&&s==sb
   (Tup a) == (Tup b) = a==b
   a == b = True
+instance Show Expr where
+  show (OpM _) = "<monadic function>"
+  show (OpD _) = "<dyadic function>"
+  show (Function _) = "<function>"
+  show (Lit a t) = concat ["Lit ",show a," ",show t]
+  show (Quote a) = "Quote "++show a
 
 vs :: [Var]
 vs = [Var "cprog" (Lit [] $ SType ["program"]) 0]
@@ -61,22 +67,16 @@ downLevel = chop (\k@(kh:ks) -> if | kh=='(' -> let (kka,kks) = parens "()" ([],
                                                 in (concat ["(",kka,")"],kks)
                                    | kh=='{' -> let (kka,kks) = parens "{}" ([],ks) 1
                                                 in (concat ["{",kka,"}"],kks)
-                                   | kh`elem`" \r\t\n" -> ([],snd $ span (flip elem " \r\t\n") ks)
-                                   | otherwise -> span (not . flip elem " \r\t\n({,<>+-/*") k)
+                                   | kh`elem`" \r\t\n" ->
+                                       ([],snd $ span (`elem`" \r\t\n") ks)
+                                   | kh`elem`"<>+-/*," -> ([kh],ks)
+                                   | otherwise -> span (not . (`elem`" \r\t\n({,<>+-/*")) k)
 
 parens :: [Char] -> ([Char],[Char]) -> Int -> ([Char],[Char])
 parens (a:b:_) (e,(kh:ks)) amt = if | kh==a -> parens (a:b:[]) (e++[a],ks) (amt+1)
                                     | kh==b -> if amt == 1 then (e,ks) else parens (a:b:[]) (e++[b],ks) (amt-1)
                                     | otherwise -> parens (a:b:[]) (e++[kh],ks) amt
 parens _ _ _ = ([],[])
-
-{- lexe :: [Char] -> SExp
-lexe q = let qx = filter (not . null) $ downLevel q in
-  case qx of (('\'':ks):[]) -> Quote $ lexe ks
-             (":A:":[]) -> Arg
-             (qh:[]) -> SL qh (typeOf qh)
-             (qh:qs) -> SApp (lexe qh) (map lexe qs)
-             _       -> SList [] -}
 
 conv :: [[Char]] -> [([Char],SType)]
 -- use of head here is dangerous, but empty strings were filtered previously.
@@ -143,4 +143,4 @@ parse vs (a:[]) = (vs,a)
 parse vs _ = (vs,LError "Error: ill-formed expression.\n")
 
 main = do
-  putStrLn "nothing\n"
+  putStrLn $ show $ lexer "1, (123, (1,124))"
