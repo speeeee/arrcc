@@ -68,15 +68,17 @@ inputs :: SType -> [SType]
 inputs (SF a _) = a
 inputs _ = []
 
+-- TODO: fix `,' function.
+-- TODO: make `cprog' (updated after each `exec').
 pvs :: [Var]
-pvs = [Var "cprog" (Lit [] $ SType [C"program"]) 0
+pvs = [Var "pprog" (Lit [] $ SType [C"program"]) 0
       ,Var "add" (Function (\vs tup sc -> case tup of
                              (Lit a _:Lit b _:_) ->
                                let (Var _ (Lit prog _) _) = head vs
                                    res = concat ["int32_t add_",a,"_",b," = (",a,"+",b,");\n"]
-                                   nv  = Var "cprog" (Lit (prog++res) $ SType [C"program"]) 0
+                                   nv  = Var "pprog" (Lit (prog++res) $ SType [C"program"]) 0
                                in (nv:tail vs
-                                  ,Lit ("add_"++"a"++"_"++"b") $ SType [C"int32"])
+                                  ,Lit ("add_"++a++"_"++b) $ SType [C"int32"])
                              _ -> (vs,LError "not enough arguments.\n"))
                   (SF [SType [C"int32"],SType [C"int32"]] $ SType [C"int32"])) 0
       ,Var "," (OpD (\vs a b -> (vs,Tup [a,b])) (SF [SType [C"any"],SType [C"any"]] $ SType [C"T"])) 0]
@@ -137,12 +139,16 @@ getType _ = SType [C"error"]
 typeCheck :: [SType] -> [SType] -> Bool
 typeCheck = (==)
 
+combC :: Var -> Var -> Var
+combC (Var "pprog" (Lit a _) _) (Var "pprog" (Lit b _) _) = trace (show a++show b) $
+  Var "pprog" (Lit (a++b) $ SType [C"program"]) 0
+
 --exec :: [Var] -> [Expr] -> ([Var],Expr)
 --exec vs = foldl (\q nvs ->) vs . splitOn ","
 -- any output of a given expression is documented in the 'cprog' variable.
 -- WARNING: `flip union' done because when two elements match (wrt Eq instance), the LHS is preferred.
 exec :: [Var] -> [Expr] -> [Var]
-exec vs e = foldl (\nvs q -> flip union nvs $ fst $ parse vs $ symvar vs q) vs $ splitOn
+exec vs e = foldl (\nvs q -> flip union nvs $ fst $ parse nvs $ symvar nvs q) vs $ splitOn
               [(Lit "," $ SType [C"runtime",C"sym/var"])] e
 
 {- Rules of parsing:
@@ -177,7 +183,9 @@ parse vs a = (vs,LError "ill-formed expression.")-}
 parse vs q = case q of
   --(a:[]) -> (vs,a)
   (OpM f typ:r) -> uncurry f $ parse vs r
-  (l:OpD f typ:r) -> f vs (snd $ parse vs [l]) (snd $ parse vs r)
+  (l:OpD f typ:r) -> let (lvs,lhs) = parse vs [l]
+                         (rvs,rhs) = parse vs r
+                     in f (combC (head lvs) (head rvs):tail lvs) lhs rhs
   (Quote a:r) -> parse vs $ (snd $ parse vs $ symvar vs a):r
   (Function fa typ:r) -> case parse vs r of
     (_,Tup lst) -> if (map getType lst) == (inputs typ) 
@@ -187,4 +195,4 @@ parse vs q = case q of
   _ -> (vs,LError "ill-formed expression.")
 
 main = do
-  putStrLn $ show $ exec pvs $ lexer "add(1,2)"
+  putStrLn $ show $ exec pvs $ lexer "add(1,add(2,3))"
