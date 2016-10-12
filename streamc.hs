@@ -140,7 +140,7 @@ typeCheck :: [SType] -> [SType] -> Bool
 typeCheck = (==)
 
 combC :: Var -> Var -> Var
-combC (Var "pprog" (Lit a _) _) (Var "pprog" (Lit b _) _) = trace (show a++show b) $
+combC (Var "pprog" (Lit a _) _) (Var "pprog" (Lit b _) _) =
   Var "pprog" (Lit (a++b) $ SType [C"program"]) 0
 
 --exec :: [Var] -> [Expr] -> ([Var],Expr)
@@ -186,10 +186,11 @@ parse vs q = case q of
   (l:OpD f typ:r) -> let (lvs,lhs) = parse vs [l]
                          (rvs,rhs) = parse vs r
                      in f (combC (head lvs) (head rvs):tail lvs) lhs rhs
-  (Quote a:r) -> parse vs $ (snd $ parse vs $ symvar vs a):r
+  (Quote a:r) -> let (nvs,nq) = parse vs $ symvar vs a
+                 in parse nvs $ nq:r
   (Function fa typ:r) -> case parse vs r of
-    (_,Tup lst) -> if (map getType lst) == (inputs typ) 
-                   then fa vs lst 0 else (vs,LError "type mismatch.\n")
+    (nvs,Tup lst) -> if (map getType lst) == (inputs typ) 
+                   then fa nvs lst 0 else (nvs,LError "type mismatch.\n")
     _           -> (vs,LError "function could not be applied correctly.")
   (a:[]) -> (vs,a)
   _ -> (vs,LError "ill-formed expression.")
