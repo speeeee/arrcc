@@ -41,7 +41,7 @@ instance Eq Var where
   (Var na _ _) == (Var nb _ _) = na==nb
 data Expr = Lit [Char] SType
           | Sym Expr SType Int -- (Val,Type,Scope).
-          | Tup [Expr]
+          | Tup [Expr] | Lst [Expr] SType
           | Quote [Expr] | OpD ([Var] -> Expr -> Expr -> ([Var],Expr)) SType
           | OpM ([Var] -> Expr -> ([Var],Expr)) SType
           -- | D Expr Dyad Expr
@@ -68,8 +68,9 @@ inputs :: SType -> [SType]
 inputs (SF a _) = a
 inputs _ = []
 
--- TODO: fix `,' function.
+-- DONE: fix `,' function.
 -- TODO: make `cprog' (updated after each `exec').
+-- TODO: define `cons/mk-list' as `;'.
 pvs :: [Var]
 pvs = [Var "pprog" (Lit [] $ SType [C"program"]) 0
       ,Var "add" (Function (\vs tup sc -> case tup of
@@ -81,7 +82,9 @@ pvs = [Var "pprog" (Lit [] $ SType [C"program"]) 0
                                   ,Lit ("add_"++a++"_"++b) $ SType [C"int32"])
                              _ -> (vs,LError "not enough arguments.\n"))
                   (SF [SType [C"int32"],SType [C"int32"]] $ SType [C"int32"])) 0
-      ,Var "," (OpD (\vs a b -> (vs,Tup [a,b])) (SF [SType [C"any"],SType [C"any"]] $ SType [C"T"])) 0]
+      ,Var "," (OpD (\vs a b -> case b of (Tup q) -> (vs,Tup (a:q))
+                                          _ -> (vs,Tup [a,b]))
+                 (SF [SType [C"any"],SType [C"any"]] $ SType [C"T"])) 0]
 
 downLevel :: [Char] -> [[Char]]
 downLevel = chop (\k@(kh:ks) -> if | kh=='(' -> let (kka,kks) = parens "()" ([],ks) 1
@@ -134,7 +137,8 @@ getType (OpD _ t) = t
 getType (OpM _ t) = t
 getType (Function _ t) = t
 getType (Quote _) = SType [C"runtime",C"group"]
-getType (Tup t) = SType [C"tuple"]
+getType (Tup _) = SType [C"tuple"]
+getType (Lst _ t) = SType [C"list",S t]
 getType _ = SType [C"error"]
 typeCheck :: [SType] -> [SType] -> Bool
 typeCheck = (==)
